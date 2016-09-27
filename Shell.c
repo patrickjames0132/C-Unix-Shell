@@ -1,5 +1,6 @@
 #include <stdio.h>
 #include <stdlib.h>
+#include <unistd.h>
 
 #define LSH_RL_BUFSIZE 1024
 #define LSH_TOK_BUFSIZE 64
@@ -16,7 +17,6 @@ int lsh_execute(char **args);
   Function Declarations for builtin shell commands:
 */
 int lsh_cd(char **args);
-int lsh_help(char **args);
 int lsh_exit(char **args);
 
 /*
@@ -24,19 +24,21 @@ int lsh_exit(char **args);
  */
 char *builtin_str[] = {
   "cd",
-  "help",
-  "exit"
+  "e"
 };
 
 int (*builtin_func[]) (char **) = {
   &lsh_cd,
-  &lsh_help,
   &lsh_exit
 };
 
 int lsh_num_builtins() {
   return sizeof(builtin_str) / sizeof(char *);
 }
+
+/*
+ Main function initialized
+*/
 
 int main(int argc, char **argv){
   // Load config files, if any.
@@ -80,10 +82,17 @@ char *lsh_read_line(void){
     // Read a character
     c = getchar();
     // If we hit EOF, replace it with a null character and return.
-    if (c == EOF || c == '\n') {
+    if (c == '\n') {
       buffer[position] = '\0';
       return buffer;
-    } else {
+    } 
+    else if (c == EOF){
+      buffer[position] = 'e';
+      position++;
+      buffer[position] = '\0';
+      return buffer;
+    }
+    else {
       buffer[position] = c;
     }
     position++;
@@ -152,8 +161,9 @@ int lsh_execute(char **args){
 */
 int lsh_cd(char **args){
   if (args[1] == NULL) {
-    fprintf(stderr, "lsh: expected argument to \"cd\"\n");
-  } else {
+    chdir(getenv("HOME"));
+  } 
+  else {
     if (chdir(args[1]) != 0) {
       perror("lsh");
     }
@@ -161,44 +171,47 @@ int lsh_cd(char **args){
   return 1;
 }
 
-int lsh_help(char **args){
-  int i;
-  printf("Stephen Brennan's LSH\n");
-  printf("Type program names and arguments, and hit enter.\n");
-  printf("The following are built in:\n");
-
-  for (i = 0; i < lsh_num_builtins(); i++) {
-    printf("  %s\n", builtin_str[i]);
-  }
-
-  printf("Use the man command for information on other programs.\n");
-  return 1;
-}
-
 int lsh_exit(char **args){
-  return 0;
+   printf("^D\n");
+   return 0;
 }
 
 int lsh_launch(char **args){
   pid_t pid, wpid;
   int status;
+  int i = 0;
+  FILE *stream;
 
   pid = fork();
   if (pid == 0) {
-    // Child process
-    if (execvp(args[0], args) == -1) {
-      perror("lsh");
+    while(args[i] != NULL){
+	if(strcmp(args[i], ">") == 0){
+	    args[i] = '\0';
+	    stream  = fopen(args[++i], "w");
+	    dup2(fileno(stream), STDOUT_FILENO);
+	    fclose(stream);
+	    args[i] = '\0';
+	    break;
+	}
+	i++;
     }
+    // Child process is executed using exevp().
+    // If a problem occurs, the program throws an error.
+    if (execvp(args[0], args) == -1) {
+      fprintf(stderr, "Command not found.\n");
+    }
+   
     exit(EXIT_FAILURE);
-  } else if (pid < 0) {
+  }
+  else if (pid < 0) {
     // Error forking
-    perror("lsh");
-  } else {
-    // Parent process
+    fprintf(stderr, "Could not fork new process.\n");
+  }
+  else {
+    // Parent process waits in while loop while the child is processed
     do {
       wpid = waitpid(pid, &status, WUNTRACED);
     } while (!WIFEXITED(status) && !WIFSIGNALED(status));
   }
-
   return 1;
 }
